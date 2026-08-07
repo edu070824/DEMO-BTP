@@ -1,0 +1,58 @@
+export const products = [
+  {
+    id: "PROD000001",
+    name: "Laptop Gamer 16",
+    category: "Laptops",
+    description: "Laptop gamer de 16 pulgadas para alto rendimiento.",
+    currency: "PEN",
+    price: 4599.9,
+    stock: 10,
+    reservedStock: 1,
+    active: true,
+  },
+  {
+    id: "PROD000002",
+    name: "Monitor UltraWide 34",
+    category: "Monitores",
+    description: "Monitor panorámico para productividad y entretenimiento.",
+    currency: "PEN",
+    price: 1899.9,
+    stock: 8,
+    reservedStock: 2,
+    active: true,
+  },
+  {
+    id: "PROD000003",
+    name: "Teclado Mecánico RGB",
+    category: "Accesorios",
+    description: "Teclado mecánico con iluminación RGB configurable.",
+    currency: "PEN",
+    price: 349.9,
+    stock: 20,
+    reservedStock: 3,
+    active: true,
+  },
+];
+
+export const customers = [
+  {
+    id: "CLI0000001",
+    name: "Tecnología Andina SAC",
+    documentType: "RUC",
+    documentNumber: "20601234567",
+    email: "ventas@tecnologiaandina.pe",
+    phone: "987654321",
+    address: "Av. Javier Prado 1250, Lima",
+    active: true,
+  },
+  {
+    id: "CLI0000002",
+    name: "Soluciones Digitales Perú",
+    documentType: "RUC",
+    documentNumber: "20509876543",
+    email: "compras@solucionesdigitales.pe",
+    phone: "986123456",
+    address: "Av. Arequipa 2460, Lima",
+    active: true,
+  },
+];
