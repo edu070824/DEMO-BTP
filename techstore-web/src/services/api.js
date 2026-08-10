@@ -58,7 +58,7 @@ export async function createOrder(orderPayload) {
     body: JSON.stringify(orderPayload),
   });
 
-  let data = null;
+  let data;
 
   try {
     data = await response.json();
