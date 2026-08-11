@@ -6,6 +6,7 @@ const navigationItems = [
   { label: "Productos", to: "/productos" },
   { label: "Clientes", to: "/clientes" },
   { label: "Pedidos", to: "/pedidos" },
+  { label: "Admin", to: "/admin" },
 ];
 
 function Header() {
