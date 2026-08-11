@@ -31,8 +31,10 @@ function AssistantWidget() {
 
   const {
     actions,
+    assistantMode,
     draft,
     isSubmitting,
+    isThinking,
     messages,
     placeholder,
     restartConversation,
@@ -72,7 +74,15 @@ function AssistantWidget() {
         block: "end",
       });
     }
-  }, [actions, isOpen, isSubmitting, messages, prefersReducedMotion, step]);
+  }, [
+    actions,
+    isOpen,
+    isSubmitting,
+    isThinking,
+    messages,
+    prefersReducedMotion,
+    step,
+  ]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -133,13 +143,21 @@ function AssistantWidget() {
                   <div>
                     <span>ASISTENTE TECHSTORE</span>
                     <h2>Pedidos inteligentes</h2>
-                    <small><i /> Conectado con SAP</small>
+                    <small>
+                      <i />
+                      {assistantMode === "gemini"
+                        ? "Gemini + SAP"
+                        : assistantMode === "guided"
+                          ? "Modo guiado + SAP"
+                          : "IA lista + SAP"}
+                    </small>
                   </div>
                 </div>
 
                 <div className="assistant-header-actions">
                   <button
                     aria-label="Reiniciar conversación"
+                    disabled={isSubmitting}
                     onClick={restartConversation}
                     title="Reiniciar conversación"
                     type="button"
@@ -188,7 +206,7 @@ function AssistantWidget() {
 
                 {showSummary && <OrderAssistantSummary draft={draft} />}
 
-                {isSubmitting && (
+                {(isThinking || isSubmitting) && (
                   <div className="assistant-typing" role="status">
                     <span className="assistant-message-avatar">AI</span>
                     <div>
@@ -196,7 +214,11 @@ function AssistantWidget() {
                       <i />
                       <i />
                     </div>
-                    <small>Creando pedido en SAP...</small>
+                    <small>
+                      {isSubmitting
+                        ? "Creando pedido en SAP..."
+                        : "Gemini está interpretando tu mensaje..."}
+                    </small>
                   </div>
                 )}
 
@@ -210,8 +232,8 @@ function AssistantWidget() {
                   <input
                     aria-label="Mensaje para el asistente"
                     autoComplete="off"
-                    disabled={isSubmitting}
-                    maxLength="240"
+                    disabled={isSubmitting || isThinking}
+                    maxLength="500"
                     onChange={(event) => setInput(event.target.value)}
                     placeholder={placeholder}
                     ref={inputRef}
@@ -220,7 +242,7 @@ function AssistantWidget() {
                   />
                   <button
                     aria-label="Enviar mensaje"
-                    disabled={!input.trim() || isSubmitting}
+                    disabled={!input.trim() || isSubmitting || isThinking}
                     type="submit"
                   >
                     ↑

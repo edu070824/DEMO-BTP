@@ -3,6 +3,46 @@ const API_BASE_URL =
 
 
 /* =========================================================
+   ASISTENTE INTELIGENTE
+   ========================================================= */
+
+/**
+ * Solicita al backend que Gemini interprete un mensaje.
+ * La clave de Gemini permanece exclusivamente en techstore-api/.env.
+ */
+export async function interpretAssistantMessage(assistantPayload) {
+  const response = await fetch(`${API_BASE_URL}/api/assistant/chat`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(assistantPayload),
+  });
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      data?.error ||
+        `No se pudo consultar el asistente. HTTP ${response.status}`,
+    );
+
+    error.code = data?.code || "ASSISTANT_UNAVAILABLE";
+    throw error;
+  }
+
+  return data;
+}
+
+
+/* =========================================================
    PRODUCTOS
    ========================================================= */
 

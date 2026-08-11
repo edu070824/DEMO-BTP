@@ -1,12 +1,15 @@
 import { useRef, useState } from "react";
-import { createOrder } from "../services/api";
+import {
+  createOrder,
+  interpretAssistantMessage,
+} from "../services/api";
 import { getAvailableStock } from "../utils/products";
 
 const initialDraft = {
   customer: null,
-  observation: "",
+  observation: null,
   product: null,
-  quantity: 1,
+  quantity: 0,
   seller: "",
 };
 
@@ -45,7 +48,7 @@ function createInitialMessages() {
       id: "assistant-welcome",
       role: "assistant",
       text:
-        "¡Hola! Soy el asistente de TechStore. Puedo ayudarte a crear un pedido conectado con SAP paso a paso.",
+        "¡Hola! Soy el asistente inteligente de TechStore. Puedes pedirme un pedido con tus propias palabras o utilizar las opciones rápidas.",
       time: getCurrentTime(),
     },
   ];
@@ -62,7 +65,9 @@ function findEntity(input, entities, fields) {
     return exactMatch;
   }
 
-  const indexMatch = normalizedInput.match(/(?:opcion|producto|cliente)?\s*(\d+)$/);
+  const indexMatch = normalizedInput.match(
+    /(?:opcion|producto|cliente)?\s*(\d+)$/,
+  );
 
   if (indexMatch) {
     const entityByIndex = entities[Number(indexMatch[1]) - 1];
@@ -85,6 +90,12 @@ function findEntity(input, entities, fields) {
   return partialMatches.length === 1 ? partialMatches[0] : null;
 }
 
+function findEntityById(entityId, entities) {
+  const normalizedId = normalizeText(entityId);
+
+  return entities.find((entity) => normalizeText(entity.id) === normalizedId);
+}
+
 function parseQuantity(input) {
   const normalizedInput = normalizeText(input);
   const numberMatch = normalizedInput.match(/\d+/);
@@ -100,31 +111,63 @@ function parseQuantity(input) {
   return matchedWord ? numberWords[matchedWord] : Number.NaN;
 }
 
-function isAffirmative(input) {
-  const normalizedInput = normalizeText(input);
+function isExplicitConfirmation(input) {
+  const normalizedInput = normalizeText(input).replace(/[.,!¡¿?]/g, "");
+
   return [
     "si",
     "confirmar",
     "confirmo",
     "crear",
     "crear pedido",
+    "crea el pedido",
     "confirmar pedido",
+    "confirmo el pedido",
     "adelante",
     "correcto",
+    "todo correcto",
   ].includes(normalizedInput);
 }
 
 function isCancelCommand(input) {
   const normalizedInput = normalizeText(input);
+
   return ["cancelar", "cancelar pedido", "salir", "detener"].includes(
     normalizedInput,
   );
 }
 
+function getNextRequiredStep(orderDraft) {
+  if (!orderDraft.product) {
+    return "product";
+  }
+
+  if (!Number.isInteger(orderDraft.quantity) || orderDraft.quantity <= 0) {
+    return "quantity";
+  }
+
+  if (!orderDraft.customer) {
+    return "customer";
+  }
+
+  if (!orderDraft.seller.trim()) {
+    return "seller";
+  }
+
+  if (orderDraft.observation === null) {
+    return "observation";
+  }
+
+  return "confirm";
+}
+
 function useOrderAssistant({ customers, products, refreshProducts }) {
   const messageSequence = useRef(0);
+  const busyRef = useRef(false);
+  const [assistantMode, setAssistantMode] = useState("checking");
   const [draft, setDraft] = useState(initialDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState(createInitialMessages);
   const [step, setStep] = useState("welcome");
 
@@ -172,41 +215,47 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
 
     setStep("product");
     appendAssistant(
-      "Claro. Estos son los productos disponibles. Elige uno por su nombre, código o número de la lista.",
+      "Claro. Estos son los productos disponibles. Puedes elegir una tarjeta o escribir el nombre o código del producto.",
     );
   }
 
   function restartConversation() {
+    if (isSubmitting) {
+      return;
+    }
+
+    busyRef.current = false;
     setDraft(initialDraft);
-    setIsSubmitting(false);
+    setIsThinking(false);
     setMessages(createInitialMessages());
     setStep("welcome");
   }
 
-  function cancelCurrentOrder() {
+  function cancelCurrentOrder(message) {
     setDraft(initialDraft);
     setStep("welcome");
     appendAssistant(
-      "Pedido cancelado. No se envió ninguna información a SAP. Cuando quieras, podemos comenzar de nuevo.",
+      message ||
+        "Pedido cancelado. No se envió ninguna información a SAP. Cuando quieras, podemos comenzar de nuevo.",
     );
   }
 
-  async function submitOrder() {
+  async function submitOrder(orderDraft = draft) {
     const currentProduct = products.find(
-      (product) => product.id === draft.product?.id && product.active,
+      (product) => product.id === orderDraft.product?.id && product.active,
     );
     const currentCustomer = customers.find(
-      (customer) => customer.id === draft.customer?.id && customer.active,
+      (customer) => customer.id === orderDraft.customer?.id && customer.active,
     );
 
     if (
       !currentProduct ||
-      getAvailableStock(currentProduct) < draft.quantity
+      getAvailableStock(currentProduct) < orderDraft.quantity
     ) {
       setDraft((currentDraft) => ({
         ...currentDraft,
         product: null,
-        quantity: 1,
+        quantity: 0,
       }));
       setStep("product");
       appendAssistant(
@@ -229,23 +278,37 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
       return;
     }
 
+    if (
+      !orderDraft.seller.trim() ||
+      orderDraft.seller.trim().length > 20 ||
+      orderDraft.observation === null
+    ) {
+      setStep(getNextRequiredStep(orderDraft));
+      appendAssistant(
+        "Faltan datos obligatorios del pedido. Complétalos antes de confirmar.",
+        "error",
+      );
+      return;
+    }
+
     const orderPayload = {
       IS_CABECERA: {
         ID_CLIENTE: currentCustomer.id,
         MONEDA: currentProduct.currency,
-        OBSERVACION: draft.observation.trim(),
-        VENDEDOR: draft.seller.trim(),
+        OBSERVACION: orderDraft.observation.trim(),
+        VENDEDOR: orderDraft.seller.trim(),
       },
       IT_POSICIONES: {
         item: [
           {
-            CANTIDAD: draft.quantity,
+            CANTIDAD: orderDraft.quantity,
             ID_PRODUCTO: currentProduct.id,
           },
         ],
       },
     };
 
+    busyRef.current = true;
     setIsSubmitting(true);
     setStep("submitting");
 
@@ -254,7 +317,9 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
       const responseType = String(result?.TYPE || "").trim().toUpperCase();
 
       if (["E", "A", "X"].includes(responseType)) {
-        throw new Error(result?.MESSAGE || "SAP rechazó la creación del pedido.");
+        throw new Error(
+          result?.MESSAGE || "SAP rechazó la creación del pedido.",
+        );
       }
 
       const orderId = result?.EV_ID_PEDIDO || result?.NUMBER || "";
@@ -282,18 +347,233 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
       );
       setStep("confirm");
     } finally {
+      busyRef.current = false;
       setIsSubmitting(false);
     }
   }
 
-  async function sendMessage(rawInput, displayText = "") {
-    const input = String(rawInput || "").trim();
+  function buildGeminiPayload(input) {
+    return {
+      message: input,
+      step,
+      draft: {
+        productId: draft.product?.id || "",
+        quantity: draft.quantity,
+        customerId: draft.customer?.id || "",
+        seller: draft.seller,
+        observation: draft.observation,
+      },
+      history: messages.map((message) => ({
+        role: message.role,
+        text: message.text,
+      })),
+      products: availableProducts.map((product) => ({
+        id: product.id,
+        name: product.name,
+        category: product.category,
+        currency: product.currency,
+        price: product.price,
+        availableStock: getAvailableStock(product),
+      })),
+      customers: customers.map((customer) => ({
+        id: customer.id,
+        name: customer.name,
+        documentNumber: customer.documentNumber,
+      })),
+    };
+  }
 
-    if (!input || isSubmitting) {
+  function mergeGeminiDraft(interpretation) {
+    const nextDraft = { ...draft };
+    const validationErrors = [];
+    const clearedFields = new Set(interpretation.clearFields || []);
+
+    if (clearedFields.has("product")) {
+      nextDraft.product = null;
+      nextDraft.quantity = 0;
+    }
+
+    if (clearedFields.has("quantity")) {
+      nextDraft.quantity = 0;
+    }
+
+    if (clearedFields.has("customer")) {
+      nextDraft.customer = null;
+    }
+
+    if (clearedFields.has("seller")) {
+      nextDraft.seller = "";
+    }
+
+    if (clearedFields.has("observation")) {
+      nextDraft.observation = null;
+    }
+
+    if (interpretation.productId) {
+      const selectedProduct = findEntityById(
+        interpretation.productId,
+        availableProducts,
+      );
+
+      if (!selectedProduct) {
+        validationErrors.push(
+          "No pude validar ese producto contra el catálogo disponible.",
+        );
+      } else {
+        const productChanged = nextDraft.product?.id !== selectedProduct.id;
+        nextDraft.product = selectedProduct;
+
+        if (productChanged && !interpretation.quantity) {
+          nextDraft.quantity = 0;
+        }
+      }
+    }
+
+    if (interpretation.quantity > 0) {
+      if (!nextDraft.product) {
+        validationErrors.push(
+          "Primero necesito identificar el producto para validar la cantidad.",
+        );
+      } else if (
+        interpretation.quantity > getAvailableStock(nextDraft.product)
+      ) {
+        validationErrors.push(
+          `Solo hay ${getAvailableStock(nextDraft.product)} unidades disponibles de ${nextDraft.product.name}.`,
+        );
+        nextDraft.quantity = 0;
+      } else {
+        nextDraft.quantity = interpretation.quantity;
+      }
+    }
+
+    if (interpretation.customerId) {
+      const selectedCustomer = findEntityById(
+        interpretation.customerId,
+        customers,
+      );
+
+      if (!selectedCustomer) {
+        validationErrors.push(
+          "No pude validar ese cliente contra la lista de clientes activos.",
+        );
+      } else {
+        nextDraft.customer = selectedCustomer;
+      }
+    }
+
+    if (interpretation.seller) {
+      if (interpretation.seller.length > 20) {
+        validationErrors.push(
+          "El código de vendedor debe tener como máximo 20 caracteres.",
+        );
+      } else {
+        nextDraft.seller = interpretation.seller;
+      }
+    }
+
+    if (interpretation.observationProvided) {
+      nextDraft.observation = String(interpretation.observation || "").trim();
+    }
+
+    return { nextDraft, validationErrors };
+  }
+
+  async function applyGeminiInterpretation(interpretation, input) {
+    if (interpretation.action === "cancel_order") {
+      cancelCurrentOrder(interpretation.reply);
       return;
     }
 
-    appendUser(displayText || input);
+    if (interpretation.action === "reset_order") {
+      setDraft(initialDraft);
+      setStep("product");
+      appendAssistant(interpretation.reply);
+      return;
+    }
+
+    if (interpretation.action === "start_order" && availableProducts.length === 0) {
+      setStep("welcome");
+      appendAssistant(
+        "Quiero ayudarte, pero ahora mismo no hay productos con stock disponible.",
+        "error",
+      );
+      return;
+    }
+
+    const { nextDraft, validationErrors } = mergeGeminiDraft(interpretation);
+
+    setDraft(nextDraft);
+
+    if (validationErrors.length > 0) {
+      setStep(getNextRequiredStep(nextDraft));
+      appendAssistant(validationErrors.join(" "), "error");
+      return;
+    }
+
+    const nextRequiredStep = getNextRequiredStep(nextDraft);
+    const draftChanged =
+      nextDraft.product !== draft.product ||
+      nextDraft.quantity !== draft.quantity ||
+      nextDraft.customer !== draft.customer ||
+      nextDraft.seller !== draft.seller ||
+      nextDraft.observation !== draft.observation;
+
+    if (interpretation.action === "confirm_order") {
+      setStep(nextRequiredStep);
+
+      if (
+        nextRequiredStep === "confirm" &&
+        isExplicitConfirmation(input)
+      ) {
+        await submitOrder(nextDraft);
+        return;
+      }
+
+      appendAssistant(
+        nextRequiredStep === "confirm"
+          ? "El resumen está preparado, pero necesito una confirmación explícita. Escribe “confirmar” o utiliza el botón verde."
+          : "Todavía faltan datos antes de poder confirmar el pedido.",
+      );
+      return;
+    }
+
+    if (
+      interpretation.action === "start_order" ||
+      interpretation.action === "update_draft" ||
+      interpretation.action === "request_confirmation" ||
+      draftChanged
+    ) {
+      setStep(nextRequiredStep);
+    }
+
+    if (
+      interpretation.action === "start_order" &&
+      !nextDraft.product
+    ) {
+      setStep("product");
+    } else if (
+      interpretation.showProducts &&
+      !nextDraft.product
+    ) {
+      setStep("product");
+    } else if (
+      interpretation.showCustomers &&
+      !nextDraft.customer
+    ) {
+      setStep("customer");
+    }
+
+    appendAssistant(interpretation.reply);
+  }
+
+  async function processGuidedInput(
+    input,
+    displayText = "",
+    appendUserMessage = true,
+  ) {
+    if (appendUserMessage) {
+      appendUser(displayText || input);
+    }
 
     if (input === "__restart__") {
       beginOrder();
@@ -309,7 +589,7 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
       setDraft((currentDraft) => ({
         ...currentDraft,
         product: null,
-        quantity: 1,
+        quantity: 0,
       }));
       setStep("product");
       appendAssistant("Perfecto. Elige nuevamente el producto que deseas.");
@@ -362,7 +642,11 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
         return;
       }
 
-      setDraft((currentDraft) => ({ ...currentDraft, product }));
+      setDraft((currentDraft) => ({
+        ...currentDraft,
+        product,
+        quantity: 0,
+      }));
       setStep("quantity");
       appendAssistant(
         `Elegiste ${product.name}. Hay ${getAvailableStock(product)} unidades disponibles. ¿Qué cantidad deseas?`,
@@ -473,8 +757,8 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
     }
 
     if (step === "confirm") {
-      if (input === "__confirm__" || isAffirmative(input)) {
-        await submitOrder();
+      if (input === "__confirm__" || isExplicitConfirmation(input)) {
+        await submitOrder(draft);
         return;
       }
 
@@ -484,8 +768,49 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
     }
   }
 
+  async function sendMessage(rawInput, displayText = "") {
+    const input = String(rawInput || "").trim();
+
+    if (!input || isSubmitting || isThinking || busyRef.current) {
+      return;
+    }
+
+    const isGuidedAction = input.startsWith("__");
+
+    if (isGuidedAction || assistantMode === "guided") {
+      await processGuidedInput(input, displayText);
+      return;
+    }
+
+    appendUser(displayText || input);
+    busyRef.current = true;
+    setIsThinking(true);
+
+    try {
+      const interpretation = await interpretAssistantMessage(
+        buildGeminiPayload(input),
+      );
+
+      setAssistantMode("gemini");
+      await applyGeminiInterpretation(interpretation, input);
+    } catch (error) {
+      console.warn(
+        "Gemini no está disponible; se utilizará el modo guiado:",
+        error,
+      );
+      setAssistantMode("guided");
+      appendAssistant(
+        "Gemini no está disponible en este momento. Continuaré en modo guiado y los botones rápidos seguirán funcionando.",
+      );
+      await processGuidedInput(input, "", false);
+    } finally {
+      busyRef.current = false;
+      setIsThinking(false);
+    }
+  }
+
   function getActions() {
-    if (isSubmitting || step === "submitting") {
+    if (isSubmitting || isThinking || step === "submitting") {
       return [];
     }
 
@@ -512,11 +837,15 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
 
     if (step === "quantity") {
       const maximumQuantity = getAvailableStock(draft.product);
-      return Array.from({ length: Math.min(maximumQuantity, 4) }, (_, index) => ({
-        label: `${index + 1} ${index === 0 ? "unidad" : "unidades"}`,
-        type: "chip",
-        value: String(index + 1),
-      }));
+
+      return Array.from(
+        { length: Math.min(maximumQuantity, 4) },
+        (_, index) => ({
+          label: `${index + 1} ${index === 0 ? "unidad" : "unidades"}`,
+          type: "chip",
+          value: String(index + 1),
+        }),
+      );
     }
 
     if (step === "customer") {
@@ -593,19 +922,21 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
   }
 
   const placeholders = {
-    confirm: "Escribe “confirmar” o modifica el pedido...",
+    confirm: "Confirma o pide un cambio con tus palabras...",
     customer: "Escribe el cliente o su código...",
     observation: "Escribe una observación...",
     product: "Escribe el producto o su código...",
     quantity: "Indica la cantidad...",
     seller: "Escribe el código del vendedor...",
-    welcome: "¿En qué puedo ayudarte?",
+    welcome: "Escribe libremente: “Quiero hacer un pedido”...",
   };
 
   return {
     actions: getActions(),
+    assistantMode,
     draft,
     isSubmitting,
+    isThinking,
     messages,
     placeholder: placeholders[step] || "Escribe un mensaje...",
     restartConversation,

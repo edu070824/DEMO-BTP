@@ -4,6 +4,10 @@ const cors = require("cors");
 require("dotenv").config();
 
 const { sendAlert } = require("./alertClient");
+const {
+  GeminiAssistantError,
+  interpretAssistantMessage,
+} = require("./geminiAssistant");
 
 const LOW_STOCK_THRESHOLD = Number(
   process.env.LOW_STOCK_THRESHOLD || 5
@@ -328,7 +332,86 @@ app.get("/api/health", (request, response) => {
   response.json({
     status: "ok",
     service: "techstore-api",
+    assistant: String(process.env.GEMINI_API_KEY || "").trim()
+      ? "gemini"
+      : "guided",
   });
+});
+
+
+/* =========================================================
+   ASISTENTE INTELIGENTE - INTERPRETACIÓN CON GEMINI
+
+   Gemini solo interpreta el lenguaje y devuelve una intención.
+   Este endpoint nunca crea pedidos ni se comunica con SAP.
+   ========================================================= */
+
+const assistantRequestsByIp = new Map();
+const ASSISTANT_RATE_LIMIT = 20;
+const ASSISTANT_RATE_WINDOW_MS = 60_000;
+
+function isAssistantRateLimited(ipAddress) {
+  const now = Date.now();
+  const previousRequests = assistantRequestsByIp.get(ipAddress) || [];
+  const recentRequests = previousRequests.filter(
+    (timestamp) => timestamp > now - ASSISTANT_RATE_WINDOW_MS,
+  );
+
+  recentRequests.push(now);
+  assistantRequestsByIp.set(ipAddress, recentRequests);
+
+  return recentRequests.length > ASSISTANT_RATE_LIMIT;
+}
+
+app.post("/api/assistant/chat", async (request, response) => {
+  const message = String(request.body?.message || "").trim();
+
+  if (!message) {
+    return response.status(400).json({
+      error: "El mensaje es obligatorio.",
+      code: "ASSISTANT_MESSAGE_REQUIRED",
+    });
+  }
+
+  if (message.length > 500) {
+    return response.status(400).json({
+      error: "El mensaje no puede superar los 500 caracteres.",
+      code: "ASSISTANT_MESSAGE_TOO_LONG",
+    });
+  }
+
+  if (isAssistantRateLimited(request.ip || "unknown")) {
+    return response.status(429).json({
+      error: "Se alcanzó el límite temporal de mensajes del asistente.",
+      code: "ASSISTANT_RATE_LIMITED",
+    });
+  }
+
+  try {
+    const interpretation = await interpretAssistantMessage(request.body);
+
+    return response.status(200).json(interpretation);
+  } catch (error) {
+    if (error instanceof GeminiAssistantError) {
+      console.error("Error del asistente Gemini:", {
+        code: error.code,
+        message: error.message,
+        diagnostic: error.diagnostic,
+      });
+
+      return response.status(error.status).json({
+        error: error.message,
+        code: error.code,
+      });
+    }
+
+    console.error("Error inesperado del asistente:", error.message);
+
+    return response.status(502).json({
+      error: "No fue posible procesar el mensaje del asistente.",
+      code: "ASSISTANT_UNAVAILABLE",
+    });
+  }
 });
 
 
@@ -692,5 +775,10 @@ app.listen(PORT, () => {
 
   console.log(
     `Pedidos: http://localhost:${PORT}/api/orders`
+  );
+
+  console.log(
+    `Asistente: http://localhost:${PORT}/api/assistant/chat ` +
+      `(${String(process.env.GEMINI_API_KEY || "").trim() ? "Gemini" : "modo guiado"})`
   );
 });
