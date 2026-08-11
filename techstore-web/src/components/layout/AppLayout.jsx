@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
+import AssistantWidget from "../assistant/AssistantWidget";
 import CartPanel from "./CartPanel";
 import Header from "./Header";
 
@@ -13,10 +14,13 @@ function AppLayout() {
   return (
     <div className="app">
       <Header />
+
       <main>
         <Outlet />
       </main>
+
       <CartPanel />
+      <AssistantWidget />
     </div>
   );
 }
