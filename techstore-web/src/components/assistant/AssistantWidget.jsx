@@ -40,6 +40,7 @@ function AssistantWidget() {
     restartConversation,
     sendMessage,
     step,
+    thinkingMessage,
   } = useOrderAssistant({
     customers: activeCustomers,
     products: activeProducts,
@@ -217,7 +218,7 @@ function AssistantWidget() {
                     <small>
                       {isSubmitting
                         ? "Creando pedido en SAP..."
-                        : "Gemini está interpretando tu mensaje..."}
+                        : thinkingMessage}
                     </small>
                   </div>
                 )}

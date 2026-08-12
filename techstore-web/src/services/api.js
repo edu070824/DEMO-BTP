@@ -42,6 +42,45 @@ export async function interpretAssistantMessage(assistantPayload) {
 }
 
 
+/**
+ * Genera y descarga un reporte real de stock desde el backend.
+ * El backend vuelve a consultar Integration Suite antes de construir el PDF.
+ */
+export async function generateStockReport() {
+  const response = await fetch(`${API_BASE_URL}/api/reports/stock.pdf`, {
+    method: "GET",
+    headers: {
+      Accept: "application/pdf",
+    },
+  });
+
+  if (!response.ok) {
+    let data;
+
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    throw new Error(
+      data?.error ||
+        `No se pudo generar el reporte de stock. HTTP ${response.status}`,
+    );
+  }
+
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const fileNameMatch = disposition.match(/filename="?([^";]+)"?/i);
+  const fallbackDate = new Intl.DateTimeFormat("en-CA").format(new Date());
+
+  return {
+    blob: await response.blob(),
+    fileName:
+      fileNameMatch?.[1] || `reporte-stock-techstore-${fallbackDate}.pdf`,
+  };
+}
+
+
 /* =========================================================
    PRODUCTOS
    ========================================================= */

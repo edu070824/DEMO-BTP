@@ -6,6 +6,7 @@ const DEFAULT_GEMINI_API_BASE_URL =
 
 const ALLOWED_ACTIONS = new Set([
   "chat",
+  "generate_stock_report",
   "start_order",
   "update_draft",
   "request_confirmation",
@@ -35,6 +36,7 @@ const responseJsonSchema = {
       type: "string",
       enum: [
         "chat",
+        "generate_stock_report",
         "start_order",
         "update_draft",
         "request_confirmation",
@@ -115,8 +117,9 @@ const systemInstruction = `
 Eres el asistente de pedidos de TechStore, una tienda conectada con SAP.
 Hablas siempre en español claro, amable y breve.
 
-Tu única tarea transaccional es ayudar a preparar UN pedido con UN producto.
-Puedes responder preguntas breves relacionadas con el proceso, pero debes conducir la conversación hacia los datos que falten.
+Tu tarea transaccional es ayudar a preparar UN pedido con UN producto.
+También puedes consultar el catálogo y solicitar a TechStore un reporte PDF de stock con gráfico. El sistema genera ese archivo; tú solo debes detectar la intención.
+Responde preguntas breves relacionadas con productos, clientes, stock y pedidos sin forzar siempre al usuario a crear un pedido.
 
 REGLAS DE SEGURIDAD Y NEGOCIO:
 1. Nunca afirmes que ejecutaste, creaste, modificaste o cancelaste algo en SAP. Tú solo interpretas lenguaje y preparas datos.
@@ -129,9 +132,12 @@ REGLAS DE SEGURIDAD Y NEGOCIO:
 8. Si el usuario proporciona varios datos en un solo mensaje, extráelos todos; el flujo no tiene que ser lineal.
 9. Si un nombre coincide claramente con una sola opción, devuelve su ID exacto. Si es ambiguo, no elijas y pide precisión.
 10. Devuelve exclusivamente el objeto JSON solicitado por el esquema.
+11. Si el usuario pide un reporte, informe, PDF o gráfico del stock o inventario, usa action="generate_stock_report". Nunca digas que no puedes generarlo: TechStore cuenta con una herramienta segura que lo crea con datos actuales.
+12. generate_stock_report no crea ni modifica pedidos y no debe borrar el borrador actual.
 
 SIGNIFICADO DE action:
 - chat: conversación o pregunta sin cambio transaccional.
+- generate_stock_report: solicita un PDF descargable con resumen, gráfico y detalle del stock actual.
 - start_order: quiere comenzar un pedido.
 - update_draft: aportó o modificó datos.
 - request_confirmation: ya están los datos y corresponde mostrar el resumen.

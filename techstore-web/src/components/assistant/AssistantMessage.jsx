@@ -20,6 +20,20 @@ function AssistantMessage({ message }) {
 
       <div className="assistant-message-content">
         <p>{message.text}</p>
+        {message.attachment && (
+          <a
+            className="assistant-message-attachment"
+            download={message.attachment.fileName}
+            href={message.attachment.url}
+          >
+            <span aria-hidden="true">PDF</span>
+            <span>
+              <strong>{message.attachment.label}</strong>
+              <small>{message.attachment.meta}</small>
+            </span>
+            <b aria-hidden="true">↓</b>
+          </a>
+        )}
         <time>{message.time}</time>
       </div>
 

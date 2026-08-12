@@ -8,6 +8,7 @@ const {
   GeminiAssistantError,
   interpretAssistantMessage,
 } = require("./geminiAssistant");
+const { buildStockReport } = require("./stockReport");
 
 const LOW_STOCK_THRESHOLD = Number(
   process.env.LOW_STOCK_THRESHOLD || 5
@@ -57,6 +58,7 @@ app.use(
       "Authorization",
       "X-CSRF-Token",
     ],
+    exposedHeaders: ["Content-Disposition"],
   }),
 );
 
@@ -410,6 +412,69 @@ app.post("/api/assistant/chat", async (request, response) => {
     return response.status(502).json({
       error: "No fue posible procesar el mensaje del asistente.",
       code: "ASSISTANT_UNAVAILABLE",
+    });
+  }
+});
+
+
+/* =========================================================
+   REPORTES - STOCK EN PDF
+
+   El archivo se construye exclusivamente con datos actuales
+   consultados por el backend. Gemini solo detecta la intención.
+   ========================================================= */
+
+app.get("/api/reports/stock.pdf", async (request, response) => {
+  try {
+    const accessToken = await getAccessToken();
+    const productsResponse = await axios.get(
+      process.env.IFLOW_PRODUCTS_URL,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        timeout: 30_000,
+      },
+    );
+
+    if (!Array.isArray(productsResponse.data)) {
+      return response.status(502).json({
+        error: "Integration Suite no devolvió una lista válida de productos.",
+        code: "STOCK_REPORT_INVALID_SOURCE",
+      });
+    }
+
+    const pdfBuffer = await buildStockReport(productsResponse.data);
+    const reportDate = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Lima",
+    }).format(new Date());
+    const fileName = `reporte-stock-techstore-${reportDate}.pdf`;
+
+    response.set({
+      "Cache-Control": "no-store",
+      "Content-Disposition": `attachment; filename="${fileName}"`,
+      "Content-Length": pdfBuffer.length,
+      "Content-Type": "application/pdf",
+      "X-Content-Type-Options": "nosniff",
+    });
+
+    return response.status(200).send(pdfBuffer);
+  } catch (error) {
+    const upstreamStatus = error.response?.status;
+    const upstreamData = error.response?.data;
+
+    console.error("Error generando reporte de stock:", {
+      message: error.message,
+      upstreamStatus,
+      upstreamData,
+    });
+
+    return response.status(502).json({
+      error:
+        "No fue posible generar el reporte con los datos actuales de stock.",
+      code: "STOCK_REPORT_UNAVAILABLE",
+      upstreamStatus: upstreamStatus || null,
     });
   }
 });
@@ -780,5 +845,9 @@ app.listen(PORT, () => {
   console.log(
     `Asistente: http://localhost:${PORT}/api/assistant/chat ` +
       `(${String(process.env.GEMINI_API_KEY || "").trim() ? "Gemini" : "modo guiado"})`
+  );
+
+  console.log(
+    `Reporte stock: http://localhost:${PORT}/api/reports/stock.pdf`
   );
 });

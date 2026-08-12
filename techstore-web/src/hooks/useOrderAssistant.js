@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createOrder,
+  generateStockReport,
   interpretAssistantMessage,
 } from "../services/api";
 import { getAvailableStock } from "../utils/products";
@@ -48,7 +49,7 @@ function createInitialMessages() {
       id: "assistant-welcome",
       role: "assistant",
       text:
-        "¡Hola! Soy el asistente inteligente de TechStore. Puedes pedirme un pedido con tus propias palabras o utilizar las opciones rápidas.",
+        "¡Hola! Soy el asistente inteligente de TechStore. Puedo ayudarte a crear pedidos, consultar el stock o preparar un reporte PDF con gráfico.",
       time: getCurrentTime(),
     },
   ];
@@ -137,6 +138,18 @@ function isCancelCommand(input) {
   );
 }
 
+function isStockReportRequest(input) {
+  const normalizedInput = normalizeText(input);
+  const asksForDocument = ["pdf", "reporte", "informe", "grafico"].some(
+    (keyword) => normalizedInput.includes(keyword),
+  );
+  const asksAboutStock = ["stock", "inventario", "productos"].some(
+    (keyword) => normalizedInput.includes(keyword),
+  );
+
+  return asksForDocument && asksAboutStock;
+}
+
 function getNextRequiredStep(orderDraft) {
   if (!orderDraft.product) {
     return "product";
@@ -164,21 +177,36 @@ function getNextRequiredStep(orderDraft) {
 function useOrderAssistant({ customers, products, refreshProducts }) {
   const messageSequence = useRef(0);
   const busyRef = useRef(false);
+  const reportUrlsRef = useRef(new Set());
   const [assistantMode, setAssistantMode] = useState("checking");
   const [draft, setDraft] = useState(initialDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState(createInitialMessages);
   const [step, setStep] = useState("welcome");
+  const [thinkingMessage, setThinkingMessage] = useState(
+    "Gemini está interpretando tu mensaje...",
+  );
 
   const availableProducts = products.filter(
     (product) => getAvailableStock(product) > 0,
   );
 
-  function createMessage(role, text, status = "") {
+  useEffect(
+    () => () => {
+      reportUrlsRef.current.forEach((reportUrl) => {
+        URL.revokeObjectURL(reportUrl);
+      });
+      reportUrlsRef.current.clear();
+    },
+    [],
+  );
+
+  function createMessage(role, text, status = "", extra = {}) {
     messageSequence.current += 1;
 
     return {
+      ...extra,
       id: `${role}-${messageSequence.current}`,
       role,
       status,
@@ -187,10 +215,10 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
     };
   }
 
-  function appendAssistant(text, status = "") {
+  function appendAssistant(text, status = "", extra = {}) {
     setMessages((currentMessages) => [
       ...currentMessages,
-      createMessage("assistant", text, status),
+      createMessage("assistant", text, status, extra),
     ]);
   }
 
@@ -199,6 +227,34 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
       ...currentMessages,
       createMessage("user", text),
     ]);
+  }
+
+  async function createStockReportAttachment() {
+    try {
+      const report = await generateStockReport();
+      const reportUrl = URL.createObjectURL(report.blob);
+
+      reportUrlsRef.current.add(reportUrl);
+      appendAssistant(
+        "¡Listo! Preparé el reporte con el stock actual consultado desde SAP. Incluye indicadores, gráfico de disponibilidad y el detalle completo por producto.",
+        "success",
+        {
+          attachment: {
+            fileName: report.fileName,
+            label: "Descargar reporte de stock",
+            meta: "PDF · Datos actuales · Gráfico incluido",
+            url: reportUrl,
+          },
+        },
+      );
+    } catch (error) {
+      console.error("No fue posible generar el reporte de stock:", error);
+      appendAssistant(
+        error.message ||
+          "No fue posible generar el reporte con el stock actual. Inténtalo nuevamente.",
+        "error",
+      );
+    }
   }
 
   function beginOrder() {
@@ -225,8 +281,13 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
     }
 
     busyRef.current = false;
+    reportUrlsRef.current.forEach((reportUrl) => {
+      URL.revokeObjectURL(reportUrl);
+    });
+    reportUrlsRef.current.clear();
     setDraft(initialDraft);
     setIsThinking(false);
+    setThinkingMessage("Gemini está interpretando tu mensaje...");
     setMessages(createInitialMessages());
     setStep("welcome");
   }
@@ -479,6 +540,12 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
   }
 
   async function applyGeminiInterpretation(interpretation, input) {
+    if (interpretation.action === "generate_stock_report") {
+      setThinkingMessage("Generando tu reporte PDF con datos de SAP...");
+      await createStockReportAttachment();
+      return;
+    }
+
     if (interpretation.action === "cancel_order") {
       cancelCurrentOrder(interpretation.reply);
       return;
@@ -775,6 +842,26 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
       return;
     }
 
+    const wantsStockReport =
+      input === "__stock_report__" || isStockReportRequest(input);
+
+    if (wantsStockReport) {
+      appendUser(displayText || input);
+      busyRef.current = true;
+      setIsThinking(true);
+      setThinkingMessage("Generando tu reporte PDF con datos de SAP...");
+
+      try {
+        await createStockReportAttachment();
+      } finally {
+        busyRef.current = false;
+        setIsThinking(false);
+        setThinkingMessage("Gemini está interpretando tu mensaje...");
+      }
+
+      return;
+    }
+
     const isGuidedAction = input.startsWith("__");
 
     if (isGuidedAction || assistantMode === "guided") {
@@ -785,6 +872,7 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
     appendUser(displayText || input);
     busyRef.current = true;
     setIsThinking(true);
+    setThinkingMessage("Gemini está interpretando tu mensaje...");
 
     try {
       const interpretation = await interpretAssistantMessage(
@@ -806,6 +894,7 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
     } finally {
       busyRef.current = false;
       setIsThinking(false);
+      setThinkingMessage("Gemini está interpretando tu mensaje...");
     }
   }
 
@@ -820,6 +909,11 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
           label: "Crear un pedido",
           type: "primary",
           value: "__start__",
+        },
+        {
+          label: "Reporte de stock PDF",
+          type: "report",
+          value: "__stock_report__",
         },
       ];
     }
@@ -915,6 +1009,11 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
           type: "primary",
           value: "__restart__",
         },
+        {
+          label: "Reporte de stock PDF",
+          type: "report",
+          value: "__stock_report__",
+        },
       ];
     }
 
@@ -928,7 +1027,7 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
     product: "Escribe el producto o su código...",
     quantity: "Indica la cantidad...",
     seller: "Escribe el código del vendedor...",
-    welcome: "Escribe libremente: “Quiero hacer un pedido”...",
+    welcome: "Pide un pedido, consulta stock o solicita un reporte PDF...",
   };
 
   return {
@@ -942,6 +1041,7 @@ function useOrderAssistant({ customers, products, refreshProducts }) {
     restartConversation,
     sendMessage,
     step,
+    thinkingMessage,
   };
 }
 

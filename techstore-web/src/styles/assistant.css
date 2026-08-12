@@ -302,6 +302,12 @@ html[data-theme="dark"] .assistant-backdrop {
   transform: translateY(-1px);
 }
 
+.assistant-header-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  transform: none;
+}
+
 .assistant-context-bar {
   min-height: 44px;
   padding: 0 17px;
@@ -464,6 +470,76 @@ html[data-theme="dark"] .assistant-backdrop {
   white-space: pre-line;
 }
 
+.assistant-message-attachment {
+  margin-top: 10px;
+  min-height: 51px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 25px;
+  align-items: center;
+  gap: 9px;
+  color: var(--assistant-text);
+  border: 1px solid color-mix(in srgb, var(--assistant-green) 28%, var(--assistant-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--assistant-green) 8%, var(--assistant-surface));
+  text-decoration: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.assistant-message-attachment:hover {
+  border-color: color-mix(in srgb, var(--assistant-green) 55%, var(--assistant-border));
+  box-shadow: 0 9px 20px rgba(31, 157, 92, 0.13);
+  transform: translateY(-1px);
+}
+
+.assistant-message-attachment > span:first-child {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #e04b5f, #ba263c);
+  box-shadow: 0 6px 13px rgba(190, 38, 60, 0.18);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.35px;
+}
+
+.assistant-message-attachment > span:nth-child(2) {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.assistant-message-attachment strong {
+  overflow: hidden;
+  color: var(--assistant-text);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-message-attachment small {
+  overflow: hidden;
+  color: var(--assistant-muted);
+  font-size: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-message-attachment > b {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #209e61, #35bd76);
+  font-size: 12px;
+}
+
 .assistant-message-content time {
   display: block;
   margin-top: 5px;
@@ -516,6 +592,28 @@ html[data-theme="dark"] .assistant-backdrop {
   border-color: transparent;
   background: linear-gradient(120deg, var(--assistant-blue), var(--assistant-violet));
   box-shadow: 0 8px 18px rgba(67, 73, 214, 0.16);
+}
+
+.assistant-option.is-report {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--assistant-text);
+  border-color: color-mix(in srgb, var(--assistant-violet) 28%, var(--assistant-border));
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--assistant-blue) 9%, var(--assistant-bg)),
+    color-mix(in srgb, var(--assistant-violet) 10%, var(--assistant-bg))
+  );
+}
+
+.assistant-option.is-report::before {
+  content: "PDF";
+  margin-right: 5px;
+  color: #d63f55;
+  font-size: 6px;
+  font-weight: 950;
+  letter-spacing: 0.35px;
 }
 
 .assistant-option.is-confirm {
