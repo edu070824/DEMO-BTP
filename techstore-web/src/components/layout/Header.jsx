@@ -1,21 +1,70 @@
-import { NavLink } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
 import { useTechStore } from "../../hooks/useTechStore";
 
-const navigationItems = [
+const standardNavigationItems = [
   { label: "Inicio", to: "/" },
   { label: "Productos", to: "/productos" },
   { label: "Clientes", to: "/clientes" },
   { label: "Pedidos", to: "/pedidos" },
-  { label: "Admin", to: "/admin" },
 ];
 
 function Header() {
+  const navigate = useNavigate();
+  const accountMenuRef = useRef(null);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const { isAdmin, logout, user } = useAuth();
   const {
     cartCount,
+    requestFlowNavigation,
+    resetWorkspaceSession,
     setIsCartOpen,
     theme,
     toggleTheme,
   } = useTechStore();
+  const navigationItems = isAdmin
+    ? [...standardNavigationItems, { label: "Admin", to: "/admin" }]
+    : standardNavigationItems;
+
+  useEffect(() => {
+    if (!isAccountMenuOpen) {
+      return undefined;
+    }
+
+    function handleOutsideClick(event) {
+      if (!accountMenuRef.current?.contains(event.target)) {
+        setIsAccountMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setIsAccountMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("pointerdown", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isAccountMenuOpen]);
+
+  function handleLogout() {
+    setIsAccountMenuOpen(false);
+    resetWorkspaceSession();
+    logout();
+    navigate("/login", { replace: true });
+  }
+
+  function handleNavigation(event, destination) {
+    if (!requestFlowNavigation(destination)) {
+      event.preventDefault();
+    }
+  }
 
   return (
     <header className="header">
@@ -36,6 +85,7 @@ function Header() {
               to={item.to}
               end={item.to === "/"}
               className={({ isActive }) => (isActive ? "active" : undefined)}
+              onClick={(event) => handleNavigation(event, item.to)}
             >
               {item.label}
             </NavLink>
@@ -74,6 +124,43 @@ function Header() {
           >
             Carrito ({cartCount})
           </button>
+
+          <div className="account-menu" ref={accountMenuRef}>
+            <button
+              aria-expanded={isAccountMenuOpen}
+              aria-haspopup="menu"
+              aria-label="Abrir menú de la cuenta"
+              className="account-trigger"
+              onClick={() =>
+                setIsAccountMenuOpen((currentValue) => !currentValue)
+              }
+              type="button"
+            >
+              <span>{user?.name?.charAt(0) || "T"}</span>
+              <div>
+                <strong>{isAdmin ? "Administrador" : "Usuario"}</strong>
+                <small>{user?.email}</small>
+              </div>
+              <b aria-hidden="true">⌄</b>
+            </button>
+
+            {isAccountMenuOpen && (
+              <div className="account-popover" role="menu">
+                <div className="account-popover-profile">
+                  <span>{user?.name?.charAt(0) || "T"}</span>
+                  <div>
+                    <strong>{user?.name}</strong>
+                    <small>{isAdmin ? "Acceso administrador" : "Acceso usuario"}</small>
+                  </div>
+                </div>
+
+                <button onClick={handleLogout} role="menuitem" type="button">
+                  <span aria-hidden="true">↪</span>
+                  Cerrar sesión
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>

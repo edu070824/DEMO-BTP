@@ -14,7 +14,7 @@ function CustomersView() {
     isLoadingCustomers,
     selectedCustomer,
     selectedCustomerId,
-    setSelectedCustomerId,
+    selectCustomer,
   } = useTechStore();
 
   return (
@@ -59,7 +59,7 @@ function CustomersView() {
             isSelected={customer.id === selectedCustomerId}
             key={customer.id}
             prefersReducedMotion={prefersReducedMotion}
-            selectCustomer={setSelectedCustomerId}
+            selectCustomer={selectCustomer}
           />
         ))}
       </motion.div>

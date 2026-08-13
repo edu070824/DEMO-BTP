@@ -13,6 +13,7 @@ function CartPanel() {
     cartTotal,
     isCartOpen,
     removeFromCart,
+    requestFlowNavigation,
     selectedCustomer,
     setIsCartOpen,
     updateCartQuantity,
@@ -23,6 +24,11 @@ function CartPanel() {
   }
 
   function goToRoute(path) {
+    if (!requestFlowNavigation(path)) {
+      setIsCartOpen(false);
+      return;
+    }
+
     setIsCartOpen(false);
     navigate(path);
   }
@@ -163,7 +169,6 @@ function CartPanel() {
               <button
                 className="continue-order-button"
                 type="button"
-                disabled={!selectedCustomer || cart.length === 0}
                 onClick={() => goToRoute("/pedidos")}
               >
                 {selectedCustomer

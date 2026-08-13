@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -12,10 +13,12 @@ import {
 } from "../services/api";
 
 import { getAvailableStock } from "../utils/products";
+import { useAuth } from "../hooks/useAuth";
 import { TechStoreContext } from "./techStoreContext";
 
 
 export function TechStoreProvider({ children }) {
+  const { isAuthenticated } = useAuth();
   /* =========================================================
      PRODUCTOS
      ========================================================= */
@@ -50,6 +53,51 @@ export function TechStoreProvider({ children }) {
 
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [orderResponse, setOrderResponse] = useState(null);
+
+
+  /* =========================================================
+     NOTIFICACIONES DEL FLUJO DE COMPRA
+     ========================================================= */
+
+  const notificationTimerRef = useRef(null);
+  const [flowNotification, setFlowNotification] = useState(null);
+
+  const dismissNotification = useCallback(() => {
+    if (notificationTimerRef.current) {
+      window.clearTimeout(notificationTimerRef.current);
+      notificationTimerRef.current = null;
+    }
+
+    setFlowNotification(null);
+  }, []);
+
+  const showNotification = useCallback((notification) => {
+    if (notificationTimerRef.current) {
+      window.clearTimeout(notificationTimerRef.current);
+    }
+
+    const duration = notification.duration || 5200;
+    const nextNotification = {
+      ...notification,
+      duration,
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    };
+
+    setFlowNotification(nextNotification);
+    notificationTimerRef.current = window.setTimeout(() => {
+      setFlowNotification(null);
+      notificationTimerRef.current = null;
+    }, duration);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (notificationTimerRef.current) {
+        window.clearTimeout(notificationTimerRef.current);
+      }
+    },
+    [],
+  );
 
 
   /* =========================================================
@@ -155,17 +203,33 @@ export function TechStoreProvider({ children }) {
      ========================================================= */
 
   useEffect(() => {
-    refreshProducts().catch(() => {
-      // El error ya queda registrado en productsError.
-    });
-  }, [refreshProducts]);
+    if (!isAuthenticated) {
+      return undefined;
+    }
+
+    const loadTimer = window.setTimeout(() => {
+      refreshProducts().catch(() => {
+        // El error ya queda registrado en productsError.
+      });
+    }, 0);
+
+    return () => window.clearTimeout(loadTimer);
+  }, [isAuthenticated, refreshProducts]);
 
 
   useEffect(() => {
-    refreshCustomers().catch(() => {
-      // El error ya queda registrado en customersError.
-    });
-  }, [refreshCustomers]);
+    if (!isAuthenticated) {
+      return undefined;
+    }
+
+    const loadTimer = window.setTimeout(() => {
+      refreshCustomers().catch(() => {
+        // El error ya queda registrado en customersError.
+      });
+    }, 0);
+
+    return () => window.clearTimeout(loadTimer);
+  }, [isAuthenticated, refreshCustomers]);
 
 
   /* =========================================================
@@ -253,43 +317,132 @@ export function TechStoreProvider({ children }) {
   function addToCart(product) {
     const availableStock =
       getAvailableStock(product);
+    const existingProduct = cart.find(
+      (item) => item.id === product.id,
+    );
 
-    setCart((currentCart) => {
-      const existingProduct =
-        currentCart.find(
-          (item) =>
-            item.id === product.id,
-        );
+    if (availableStock <= 0 || existingProduct?.quantity >= availableStock) {
+      showNotification({
+        eyebrow: "STOCK ALCANZADO",
+        message: `Ya agregaste todas las unidades disponibles de ${product.name}.`,
+        title: "No quedan más unidades",
+        type: "error",
+      });
+      return false;
+    }
 
-      if (
-        existingProduct?.quantity >=
-        availableStock
-      ) {
-        return currentCart;
-      }
+    const nextQuantity = existingProduct
+      ? existingProduct.quantity + 1
+      : 1;
 
-      if (existingProduct) {
-        return currentCart.map(
-          (item) =>
+    setCart((currentCart) =>
+      existingProduct
+        ? currentCart.map((item) =>
             item.id === product.id
-              ? {
-                  ...item,
-                  quantity:
-                    item.quantity + 1,
-                }
+              ? { ...item, quantity: item.quantity + 1 }
               : item,
-        );
-      }
+          )
+        : [...currentCart, { ...product, quantity: 1 }],
+    );
 
-      return [
-        ...currentCart,
-        {
-          ...product,
-          quantity: 1,
-        },
-      ];
+    showNotification({
+      action: {
+        label: "Elegir cliente",
+        to: "/clientes",
+      },
+      eyebrow: "PRODUCTO AGREGADO",
+      message:
+        nextQuantity > 1
+          ? `Ahora tienes ${nextQuantity} unidades de ${product.name} en el carrito.`
+          : `${product.name} ya forma parte de tu pedido.`,
+      meta: "Paso 1 completado · Continúa seleccionando un cliente",
+      title: "¡Agregado correctamente!",
+      type: "success",
     });
+
+    return true;
   }
+
+
+  function selectCustomer(customerId) {
+    const customer = customers.find(
+      (currentCustomer) => currentCustomer.id === customerId,
+    );
+
+    setSelectedCustomerId(customerId);
+
+    if (customer) {
+      showNotification({
+        action: {
+          label: "Revisar pedido",
+          to: "/pedidos",
+        },
+        eyebrow: "CLIENTE SELECCIONADO",
+        message: `${customer.name} recibirá los productos del pedido.`,
+        meta: "Paso 2 completado · Tu pedido está listo para revisar",
+        title: "Cliente confirmado",
+        type: "success",
+      });
+    }
+  }
+
+
+  const requestFlowNavigation = useCallback((destination) => {
+    if (destination === "/clientes" && cart.length === 0) {
+      showNotification({
+        action: {
+          label: "Ver productos",
+          to: "/productos",
+        },
+        eyebrow: "PASO 1 PENDIENTE",
+        message:
+          "Antes de elegir un cliente debes agregar como mínimo un producto al carrito.",
+        meta: "Flujo de compra · Producto → Cliente → Pedido",
+        title: "Primero selecciona un producto",
+        type: "guidance",
+      });
+      return false;
+    }
+
+    if (destination === "/pedidos" && cart.length === 0) {
+      showNotification({
+        action: {
+          label: "Seleccionar producto",
+          to: "/productos",
+        },
+        eyebrow: "PEDIDO INCOMPLETO",
+        message: selectedCustomer
+          ? "El cliente ya está elegido. Agrega como mínimo un producto para acceder a Pedidos."
+          : "Para acceder a Pedidos debes agregar un producto y después seleccionar el cliente.",
+        meta: selectedCustomer
+          ? "Falta el paso 1 del flujo de compra"
+          : "Faltan los pasos 1 y 2 del flujo de compra",
+        title: selectedCustomer
+          ? "Selecciona un producto"
+          : "Completa primero tu compra",
+        type: "guidance",
+      });
+      return false;
+    }
+
+    if (destination === "/pedidos" && !selectedCustomer) {
+      showNotification({
+        action: {
+          label: "Elegir cliente",
+          to: "/clientes",
+        },
+        eyebrow: "PASO 2 PENDIENTE",
+        message:
+          "Ya tienes productos en el carrito. Ahora selecciona el cliente que recibirá el pedido.",
+        meta: "Solo falta elegir un cliente para continuar",
+        title: "Selecciona un cliente",
+        type: "guidance",
+      });
+      return false;
+    }
+
+    return true;
+  }, [cart.length, selectedCustomer, showNotification]);
 
 
   function updateCartQuantity(
@@ -331,6 +484,17 @@ export function TechStoreProvider({ children }) {
           item.id !== productId,
       ),
     );
+  }
+
+
+  function resetWorkspaceSession() {
+    dismissNotification();
+    setCart([]);
+    setSelectedCustomerId("");
+    setIsCartOpen(false);
+    setSeller("VENDEDOR01");
+    setObservation("PEDIDO CREADO DESDE WEB");
+    setOrderResponse(null);
   }
 
 
@@ -427,6 +591,10 @@ export function TechStoreProvider({ children }) {
 
     customersError,
 
+    dismissNotification,
+
+    flowNotification,
+
     handleCreateOrder,
 
     isCartOpen,
@@ -449,20 +617,27 @@ export function TechStoreProvider({ children }) {
     refreshCustomers,
     refreshProducts,
 
+    requestFlowNavigation,
+
+    resetWorkspaceSession,
+
     removeFromCart,
 
     selectedCustomer,
     selectedCustomerId,
 
+    selectCustomer,
+
     seller,
 
     setIsCartOpen,
     setObservation,
-    setSelectedCustomerId,
     setSeller,
 
     theme,
     toggleTheme,
+
+    showNotification,
 
     updateCartQuantity,
   };
